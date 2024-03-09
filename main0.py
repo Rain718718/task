@@ -3,6 +3,9 @@ import threading
 import numpy as np
 import queue
 import csv
+import concurrent.futures
+# 简化成一个时间一个推理任务，直接调用函数也可，这里为了方便修改max_workers，继续使用原代码
+thread_pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 JOB_NUM = 100  # 发送请求的个数
 
@@ -18,6 +21,20 @@ p1 = np.poly1d(z1)
 z2 = np.polyfit(x, next_time, 1)
 p2 = np.poly1d(z2)
 
+#######################################################
+# 创建全局队列，作为缓冲区使用
+request_queue = queue.Queue()
+# 和之前机器学习的最小二乘法使用方法一样，计算迭代时间
+def fit_first_iter_time(prompt_length):
+    return p1(prompt_length)
+
+def fit_next_iter_time(prompt_length):
+    return p2(prompt_length)
+
+
+
+#######################################################
+
 class Request:  # 推理请求，理论上输出长度未知，但为仿真实验，需要事先确定
     def __init__(self, j_id, prompt_length, output_length):
         self.j_id = j_id
@@ -29,7 +46,9 @@ class Request:  # 推理请求，理论上输出长度未知，但为仿真实�
         self.priority = -1  # 请求目前处于第几级队列
         
         self.create_time = time.time()  # 请求创建时间
-        
+
+
+
 class RequestGenerator(threading.Thread):
 
     def __init__(self, arrival_rate):
@@ -41,7 +60,7 @@ class RequestGenerator(threading.Thread):
         output_length_list = []
         
         # 此处为读取orca数据集中的数据来构造request，可自行修改路径
-        f = open('/simulation/orca_100k.csv', 'r')
+        f = open('./orca_100k.csv', 'r')
         with f:
             reader = csv.reader(f)
             for row in reader:
@@ -75,10 +94,10 @@ class SkipJoinMLFQScheduler:
         self.quantum_list = []
         self.multi_level_priority_queue = []
         self.executed = 0  # 已经完成的请求数量
-
+        # 论文中的quantum是在first_quantum上乘quantum_rate，和这里有点不一样
         # first quantum/Q1 is the min iteration time
         for i in range(queue_num):
-            self.quantum_list.append(quantum_rate ** i)
+            self.quantum_list.append(first_quantum*(quantum_rate ** i))
             temp_q = queue.Queue(-1) 
             self.multi_level_priority_queue.append(temp_q)
             
@@ -88,32 +107,17 @@ class SkipJoinMLFQScheduler:
         # Todo: 处理缓冲区中新到达的request，根据他们的输入长度放入多级队列中
         pass
     
-    def demoteRequest(self, job):
+    def demoteRequest(self, job: Request):
         # Todo: 将完成了推理但还没生成完毕的请求放入下一级队列
         pass
+
     
     def getInferenceJob(self):
         # Todo: 返回在最高优先级的队列中的队首请求
-        pass
+        for queue in self.multi_level_priority_queue:
+            if not queue.empty():
+                return queue.get()
         
-# 推理线程
-def run(scheduler):
-    while scheduler.executed != JOB_NUM:
-        for i in range(request_queue.qsize()):
-            req = request_queue.get()
-            scheduler.getNewRequest(req)
-
-        job = scheduler.getInferenceJob()
-
-        if job.iter_count == 0:
-            iter_time = job.first_iter_time
-        else:
-            iter_time = job.next_iter_time
-
-        args = [iter_time, job, scheduler]
-        # 调用模拟推理线程
-        temp_thread = thread_pool.submit(lambda p: simulate_forward(*p), args)
-
 
 
 def simulate_forward(iteration_time, job, scheduler):
@@ -141,8 +145,30 @@ def simulate_forward(iteration_time, job, scheduler):
 
 
 
+# 推理线程
+def run(scheduler):
+    while scheduler.executed != JOB_NUM:
+        for i in range(request_queue.qsize()):
+            req = request_queue.get()
+            scheduler.getNewRequest(req)
+
+        job = scheduler.getInferenceJob()
+
+        if job.iter_count == 0:
+            iter_time = job.first_iter_time
+        else:
+            iter_time = job.next_iter_time
+
+        args = [iter_time, job, scheduler]
+        # 调用模拟推理线程
+        temp_thread = thread_pool.submit(lambda p: simulate_forward(*p), args)
+
 
 if __name__ == '__main__':
+    arrival_rate=2
+    quantum=6
+    quantum_rate=4
+    queue_num=4
     # 定义并启动发送请求的用户线程
     generator = RequestGenerator(arrival_rate=arrival_rate)
     generator.start()
@@ -152,3 +178,4 @@ if __name__ == '__main__':
                                       quantum_rate=quantum_rate,
                                       queue_num=queue_num)
     run(scheduler)
+    thread_pool.shutdown()
