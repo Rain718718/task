@@ -4,10 +4,9 @@ import numpy as np
 import queue
 import csv
 import concurrent.futures
-# 简化成一个时间一个推理任务，直接调用函数也可，这里为了方便修改max_workers，继续使用原代码
-thread_pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
-JOB_NUM = 100  # 发送请求的个数
+
+JOB_NUM = 99  # 发送请求的个数
 
 # 在opt-1.3B上的实验数据 单位: ms
 x = [1, 4, 16, 64, 256, 512, 1024]
@@ -40,8 +39,8 @@ class Request:  # 推理请求，理论上输出长度未知，但为仿真实�
         self.j_id = j_id
         self.prompt_length = int(prompt_length)
         self.output_length = int(output_length)
-        self.first_iter_time = fit_first_iter_time(prompt_length)
-        self.next_iter_time  = fit_next_iter_time(prompt_length)
+        self.first_iter_time = fit_first_iter_time(self.prompt_length)
+        self.next_iter_time  = fit_next_iter_time(self.output_length)
         self.iter_count = 0 # 请求执行了几次迭代，iter_count==output_length时完成整个推理   
         self.priority = -1  # 请求目前处于第几级队列
         
@@ -60,19 +59,20 @@ class RequestGenerator(threading.Thread):
         output_length_list = []
         
         # 此处为读取orca数据集中的数据来构造request，可自行修改路径
-        f = open('./orca_100k.csv', 'r')
+        f = open('D:/code/Py/MyTask/orca_100k.csv', 'r')
         with f:
             reader = csv.reader(f)
+            count=0
             for row in reader:
                 if count == 0:
                     count += 1
                     continue
-
+                
                 prompt_length_list.append(row[0])
                 output_length_list.append(row[1])
                 
         j_id = 0
-
+        
         while j_id < JOB_NUM:
             output_ = output_length_list[j_id]
             input_ = prompt_length_list[j_id]
@@ -91,13 +91,16 @@ class SkipJoinMLFQScheduler:
 
     def __init__(self, first_quantum=6, quantum_rate=4, queue_num=4):
         # super().__init__()
+        self.first_quantum=first_quantum
+        self.quantum_rate=quantum_rate
+        self.queue_num=queue_num
         self.quantum_list = []
         self.multi_level_priority_queue = []
         self.executed = 0  # 已经完成的请求数量
         # 论文中的quantum是在first_quantum上乘quantum_rate，和这里有点不一样
         # first quantum/Q1 is the min iteration time
-        for i in range(queue_num):
-            self.quantum_list.append(first_quantum*(quantum_rate ** i))
+        for i in range(self.queue_num):
+            self.quantum_list.append(self.first_quantum*(self.quantum_rate ** i))
             temp_q = queue.Queue(-1) 
             self.multi_level_priority_queue.append(temp_q)
             
@@ -105,18 +108,27 @@ class SkipJoinMLFQScheduler:
 
     def getNewRequest(self, request: Request):
         # Todo: 处理缓冲区中新到达的request，根据他们的输入长度放入多级队列中
-        pass
+        for i in range(self.queue_num):
+            if request.first_iter_time <=self.quantum_list[i] or i==self.queue_num-1:
+                request.priority=i
+                self.multi_level_priority_queue[i].put(request)
+                # print(self.multi_level_priority_queue[i].qsize() )
+                break
+
     
     def demoteRequest(self, job: Request):
         # Todo: 将完成了推理但还没生成完毕的请求放入下一级队列
-        pass
+        if job.iter_count < job.output_length:
+            if job.priority < self.queue_num-1:
+                job.priority+=1
+            self.multi_level_priority_queue[job.priority].put(job)
 
     
     def getInferenceJob(self):
         # Todo: 返回在最高优先级的队列中的队首请求
-        for queue in self.multi_level_priority_queue:
-            if not queue.empty():
-                return queue.get()
+        for q in self.multi_level_priority_queue:
+            if not q.empty():
+                return q.get()
         
 
 
@@ -151,9 +163,13 @@ def run(scheduler):
         for i in range(request_queue.qsize()):
             req = request_queue.get()
             scheduler.getNewRequest(req)
-
+        '''for i in range(4):
+            if scheduler.multi_level_priority_queue[i].qsize()!=0:
+                print(scheduler.multi_level_priority_queue[i].qsize())
+        '''
         job = scheduler.getInferenceJob()
-
+        if job==None:
+            continue
         if job.iter_count == 0:
             iter_time = job.first_iter_time
         else:
@@ -169,6 +185,8 @@ if __name__ == '__main__':
     quantum=6
     quantum_rate=4
     queue_num=4
+    # 简化成一个时间一个推理任务，直接调用函数也可，这里为了方便修改max_workers，继续使用原代码
+    thread_pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # 定义并启动发送请求的用户线程
     generator = RequestGenerator(arrival_rate=arrival_rate)
     generator.start()
@@ -178,4 +196,11 @@ if __name__ == '__main__':
                                       quantum_rate=quantum_rate,
                                       queue_num=queue_num)
     run(scheduler)
+    
+    print(len(scheduler.ave_jct))
     thread_pool.shutdown()
+    '''while 1:
+        if len(scheduler.ave_jct)>=90:
+            for i in scheduler.ave_jct:
+                print(scheduler.ave_jct[i])
+                '''
