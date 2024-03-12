@@ -23,6 +23,9 @@ p2 = np.poly1d(z2)
 #######################################################
 # 创建全局队列，作为缓冲区使用
 request_queue = queue.Queue()
+simulate_queue = queue.Queue()
+run_queue = queue.Queue()
+key=1
 # 和之前机器学习的最小二乘法使用方法一样，计算迭代时间
 def fit_first_iter_time(prompt_length):
     return p1(prompt_length)
@@ -170,12 +173,15 @@ def simulate_forward(iteration_time, job:Request, scheduler):
             job.iter_count += 1
 
         scheduler.demoteRequest(job)
+    run_queue.put(simulate_queue.get())
 
 
 
 # 推理线程
 def run(scheduler):
+    run_queue.put(key)
     while scheduler.executed != JOB_NUM:
+        simulate_queue.put(run_queue.get())
         for i in range(request_queue.qsize()):
             req = request_queue.get()
             scheduler.getNewRequest(req)
@@ -185,6 +191,7 @@ def run(scheduler):
         '''
         job = scheduler.getInferenceJob()
         if job==None:
+            run_queue.put(simulate_queue.get())
             continue
         if job.iter_count == 0:
             iter_time = job.first_iter_time
@@ -197,10 +204,10 @@ def run(scheduler):
 
 
 if __name__ == '__main__':
-    arrival_rate=4
+    arrival_rate=2
     quantum=6
-    quantum_rate=2
-    queue_num=8
+    quantum_rate=4
+    queue_num=4
     # 简化成一个时间一个推理任务，直接调用函数也可，这里为了方便修改max_workers，继续使用原代码
     thread_pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # 定义并启动发送请求的用户线程

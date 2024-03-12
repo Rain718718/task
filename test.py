@@ -34,23 +34,24 @@ plt.xlabel('ID')
 plt.ylabel('JCT')
 plt.title('所有任务的JCT')
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 选择适用于你的系统的中文字体
-ave = 60.2017146578 # 你想要的阈值
+ave = 33.23
 plt.axhline(y=ave, color='red', linestyle='--', label='平均值')
 plt.show()
 '''
 '''
 rate=[1,2,4,8,16]
-ave=[41.4,61.1,73.4,80.2,83.9]
+ave=[7.45,21.3,33.23,40.65,44.03]
 plt.plot(rate,ave)
 plt.xlabel('arrival_rate')
 plt.ylabel('Average_JCT')
 
 plt.show()
 '''
+
 queue_num=[4,8,12,16]
-ave=[62.17,62.25,63.28,64.00]
+ave=[33.23,34.53,34.26,34.67]
 plt.plot(queue_num,ave)
 plt.xlabel('queue_num')
 plt.ylabel('Average_JCT')
-plt.ylim(0, 100)  # 根据实际情况调整纵轴的最小值和最大值
+plt.ylim(0, 50)  # 根据实际情况调整纵轴的最小值和最大值
 plt.show()
