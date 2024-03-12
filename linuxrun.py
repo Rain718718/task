@@ -6,7 +6,6 @@ import csv
 import concurrent.futures
 import os
 
-
 JOB_NUM = 99  # 发送请求的个数
 
 # 在opt-1.3B上的实验数据 单位: ms
@@ -61,7 +60,7 @@ class RequestGenerator(threading.Thread):
         
         # 此处为读取orca数据集中的数据来构造request，可自行修改路径
         homedir = os.getcwd()
-        f = open(homedir+'\\orca_100k.csv', 'r')
+        f = open(homedir+'/orca_100k.csv', 'r')
         with f:
             reader = csv.reader(f)
             count=0
@@ -69,9 +68,15 @@ class RequestGenerator(threading.Thread):
                 if count == 0:
                     count += 1
                     continue
-                
-                prompt_length_list.append(row[0])
-                output_length_list.append(row[1])
+                try:
+                    prompt_length_list.append(row[0])
+                    output_length_list.append(row[1])
+                except IndexError:
+                    print(f"IndexError: 行 {row} 中的元素索引越界")
+                except Exception as e:
+                    print(f"发生了一个错误: {e}，行 {row}")
+                # prompt_length_list.append(row[0])
+                # output_length_list.append(row[1])
                 
         j_id = 0
         
@@ -139,19 +144,18 @@ def simulate_forward(iteration_time, job:Request, scheduler):
     iteration_num = scheduler.quantum_list[job.priority]  # 获取当前任务在这次推理中需要执行多少轮
     if job.iter_count==0:
         time.sleep(iteration_time / 1000)  # ms
-        print("%d\t%d\ttotal:%d"%(job.j_id,job.iter_count,job.output_length))
+        print("j_id:%d\ttoken:%d  \ttotal:%d"%(job.j_id,job.iter_count,job.output_length))
         job.iter_count += 1
         iteration_num -= iteration_time
         iteration_time = job.next_iter_time
-    
+
     iteration_num = int(iteration_num//job.next_iter_time)
-    
     if iteration_num >= job.output_length - job.iter_count:
         iteration_num = job.output_length - job.iter_count
 
         for i in range(iteration_num):
             time.sleep(iteration_time / 1000)  # ms
-            print("%d\t%d\ttotal:%d"%(job.j_id,job.iter_count,job.output_length))
+            print("j_id:%d\ttoken:%d  \ttotal:%d"%(job.j_id,job.iter_count,job.output_length))
             job.iter_count += 1
 
         jct = time.time() - job.create_time                     
@@ -162,7 +166,7 @@ def simulate_forward(iteration_time, job:Request, scheduler):
     else:
         for i in range(iteration_num):
             time.sleep(iteration_time / 1000)  # ms
-            print("%d\t%d\ttotal:%d"%(job.j_id,job.iter_count,job.output_length))
+            print("j_id:%d\ttoken:%d  \ttotal:%d"%(job.j_id,job.iter_count,job.output_length))
             job.iter_count += 1
 
         scheduler.demoteRequest(job)
@@ -193,10 +197,10 @@ def run(scheduler):
 
 
 if __name__ == '__main__':
-    arrival_rate=2
-    quantum=10
-    quantum_rate=4
-    queue_num=4
+    arrival_rate=4
+    quantum=6
+    quantum_rate=2
+    queue_num=8
     # 简化成一个时间一个推理任务，直接调用函数也可，这里为了方便修改max_workers，继续使用原代码
     thread_pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
     # 定义并启动发送请求的用户线程
@@ -213,10 +217,13 @@ if __name__ == '__main__':
         print(scheduler.ave_jct[i])
     values = np.array([x[1] for x in scheduler.ave_jct])
     print(np.mean(values))
-    
+    with open('example.txt', 'w') as f:
+        for i in scheduler.ave_jct:
+            f.write(str(i)+"\n")    
     thread_pool.shutdown()
     '''while 1:
         if len(scheduler.ave_jct)>=90:
             for i in scheduler.ave_jct:
                 print(scheduler.ave_jct[i])
                 '''
+
